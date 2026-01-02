@@ -17,5 +17,5 @@ playwright==1.46.0
 pyee==11.1.0
 soupsieve==2.6
 typing_extensions==4.12.2
-Werkzeug==3.0.3
+Werkzeug==3.1.4
 zipp==3.20.0
