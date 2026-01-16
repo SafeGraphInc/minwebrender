@@ -1,12 +1,27 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Minimal Rendered Page</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
+
 <body>
-    {{ content|safe }}
+    <div class="toolbar">
+        <a href="/" class="home-link">← Home</a>
+        <form action="/download" method="POST" style="display: inline;">
+            <input type="hidden" name="content" value="{{ markdown_content }}">
+            <input type="hidden" name="url" value="{{ url }}">
+            <button type="submit" name="format" value="text" class="btn">Download Text</button>
+            <button type="submit" name="format" value="markdown" class="btn">Download Markdown</button>
+            <button type="submit" name="format" value="jsonl" class="btn">Download JSONL</button>
+        </form>
+    </div>
+    <div class="content">
+        {{ content|safe }}
+    </div>
 </body>
+
 </html>
