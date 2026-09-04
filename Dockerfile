@@ -7,9 +7,18 @@ FROM mcr.microsoft.com/playwright/python:v1.46.0-jammy
 
 WORKDIR /app
 
+# PIP_PROGRESS_BAR=off is load-bearing, not cosmetic: pip's rich progress bar
+# spawns a refresh thread, and the dind runner's thread/pid limit makes that
+# fail with "RuntimeError: can't start new thread", killing the build mid-
+# download. The other two match the convention in galaxy's Dockerfiles.
+ENV PIP_PROGRESS_BAR=off \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+
+# No `pip install --upgrade pip`: the base image ships 24.2, every requirement
+# here is pinned, and self-upgrading pip was the step the runner died on.
 COPY requirements.txt ./
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip install -r requirements.txt
 
 COPY . ./
 
