@@ -59,10 +59,14 @@ build -> test -> push to ECR   -->  helm release `minwebrender`
   dependencies are already installed and version-matched to the pip package.
 - **Values**: [deploy/helm/](deploy/helm/) — `base.yaml` plus
   `values-production.yaml` (3 replicas) and `values-staging.yaml` (1 replica).
-- **Internal-only**: ClusterIP, no ingress. Callers use
-  `http://minwebrender.<namespace>.svc.cluster.local:10000`. The old public
-  `minwebrender.net` was an unauthenticated open renderer — anyone could make
-  SafeGraph infrastructure fetch any URL.
+- **Internal to the VPC**: the shared chart has no ClusterIP-only mode, so a
+  `subdomain` is set and an internal ALB is created. `loadbalancerIsPublic`
+  stays false, so nothing is reachable from the internet — the old public
+  `minwebrender.net` was an unauthenticated open renderer where anyone could
+  make SafeGraph infrastructure fetch any URL.
+- **In-cluster callers use `http://minwebrender`** and never touch the load
+  balancer. Port 80, not 10000: the chart puts the Service on 80 and forwards
+  to the container's 10000.
 - **No AWS permissions**: the renderer touches no S3, RDS, or Secrets Manager,
   so it needs no IRSA role and no secrets.
 - **CI test**: boots the built image and renders a page end-to-end. That is the
