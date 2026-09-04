@@ -49,18 +49,29 @@ test_image:
   services:
     - public.ecr.aws/w6b6a9x1/docker:19.03.12-dind
   before_script:
-    - apk add --no-cache aws-cli curl
+    - apk add --no-cache aws-cli
   script:
     - aws ecr get-login-password | docker login --username AWS --password-stdin $ECR_REGISTRY
     - docker pull $ECR_REPO:temporary-$CI_COMMIT_SHORT_SHA-$CI_COMMIT_REF_SLUG
-    - docker run -d --name mwr -p 10000:10000 $ECR_REPO:temporary-$CI_COMMIT_SHORT_SHA-$CI_COMMIT_REF_SLUG
+    # Probed from INSIDE the container, with no published port. The job
+    # container cannot reach the dind service by a guessable hostname -- the
+    # alias is DOCKER_HOST's host (public.ecr.aws-w6b6a9x1-docker), not
+    # `docker`, and curl exits 6 (could not resolve) on the latter. Using
+    # `docker exec` sidesteps cross-container DNS and port publishing entirely.
+    # python needs no installing: this is the Playwright *python* image.
+    - docker run -d --name mwr $ECR_REPO:temporary-$CI_COMMIT_SHORT_SHA-$CI_COMMIT_REF_SLUG
     # Chromium launches at import, so readiness is seconds; poll rather than sleep.
-    - for i in $(seq 1 30); do curl -sf http://docker:10000/healthz && break || sleep 2; done
-    - curl -sf http://docker:10000/healthz
-    - curl -sf http://docker:10000/readyz
-    - curl -sf http://docker:10000/text/example.com | grep -q "Example Domain"
-    - docker logs mwr
-    - docker rm -f mwr
+    - for i in $(seq 1 30); do docker exec mwr python -c "import urllib.request; urllib.request.urlopen('http://localhost:10000/healthz', timeout=2)" >/dev/null 2>&1 && break || sleep 2; done
+    # urlopen raises on any non-2xx, so a 503 from a dead browser fails the job.
+    - docker exec mwr python -c "import urllib.request; urllib.request.urlopen('http://localhost:10000/healthz', timeout=5)"
+    - docker exec mwr python -c "import urllib.request; urllib.request.urlopen('http://localhost:10000/readyz', timeout=5)"
+    # The real test: render a page end-to-end through Chromium.
+    - docker exec mwr python -c "import sys, urllib.request; body = urllib.request.urlopen('http://localhost:10000/text/example.com', timeout=90).read().decode(); sys.exit(0 if 'Example Domain' in body else 1)"
+  # Always runs, so a failing probe still leaves the container logs in the job
+  # output instead of aborting before `docker logs`.
+  after_script:
+    - docker logs mwr || true
+    - docker rm -f mwr || true
 
 push_image:
   stage: push
