@@ -1,0 +1,77 @@
+# Mirrors the pipeline in safegraph-agentic-research: build -> test -> push to
+# ECR, with `latest` published only from the default branch. Harness deploys the
+# Helm release from deploy/helm/.
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "external_pull_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+      when: never
+
+stages:
+  - build
+  - test
+  - push
+
+variables:
+  SERVICE: minwebrender
+  ECR_REPO: $ECR_REGISTRY/$SERVICE
+  DOCKER_TLS_CERTDIR: ""
+  DOCKER_HOST: tcp://public.ecr.aws-w6b6a9x1-docker:2375
+
+image: docker:19.03.12
+
+build_image:
+  stage: build
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "external_pull_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+  services:
+    - public.ecr.aws/w6b6a9x1/docker:19.03.12-dind
+  before_script:
+    - apk add --no-cache aws-cli
+  script:
+    - aws ecr get-login-password | docker login --username AWS --password-stdin $ECR_REGISTRY
+    - docker build . -t $ECR_REPO:temporary-$CI_COMMIT_SHORT_SHA-$CI_COMMIT_REF_SLUG
+    - docker push $ECR_REPO:temporary-$CI_COMMIT_SHORT_SHA-$CI_COMMIT_REF_SLUG
+
+# Boot the image and render a page end-to-end. This is the test that matters
+# here: it catches Chromium/playwright version skew and a browser that fails to
+# launch under the container's seccomp profile, neither of which a unit test on
+# a ~200-line Flask app would find.
+test_image:
+  stage: test
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "external_pull_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+  services:
+    - public.ecr.aws/w6b6a9x1/docker:19.03.12-dind
+  before_script:
+    - apk add --no-cache aws-cli curl
+  script:
+    - aws ecr get-login-password | docker login --username AWS --password-stdin $ECR_REGISTRY
+    - docker pull $ECR_REPO:temporary-$CI_COMMIT_SHORT_SHA-$CI_COMMIT_REF_SLUG
+    - docker run -d --name mwr -p 10000:10000 $ECR_REPO:temporary-$CI_COMMIT_SHORT_SHA-$CI_COMMIT_REF_SLUG
+    # Chromium launches at import, so readiness is seconds; poll rather than sleep.
+    - for i in $(seq 1 30); do curl -sf http://docker:10000/healthz && break || sleep 2; done
+    - curl -sf http://docker:10000/healthz
+    - curl -sf http://docker:10000/readyz
+    - curl -sf http://docker:10000/text/example.com | grep -q "Example Domain"
+    - docker logs mwr
+    - docker rm -f mwr
+
+push_image:
+  stage: push
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  services:
+    - public.ecr.aws/w6b6a9x1/docker:19.03.12-dind
+  before_script:
+    - apk add --no-cache aws-cli
+  script:
+    - aws ecr get-login-password | docker login --username AWS --password-stdin $ECR_REGISTRY
+    - docker build . -t $ECR_REPO:permanent-$CI_COMMIT_SHORT_SHA-$CI_COMMIT_REF_SLUG -t $ECR_REPO:latest
+    - docker push $ECR_REPO:permanent-$CI_COMMIT_SHORT_SHA-$CI_COMMIT_REF_SLUG
+    - docker push $ECR_REPO:latest

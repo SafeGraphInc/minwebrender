@@ -1,0 +1,80 @@
+# Headless-Chromium page renderer backing the `web_render` agent tool in
+# safegraph-agentic-research.
+#
+# Deployed as its own service (not inside the agentic-research pods) so a
+# Chromium crash, wedge, or OOM degrades web_render to its Firecrawl fallback
+# instead of taking the API and batch runner down with it. Those pods already
+# carry a sentence-transformer model and the HNSW NAICS index against a 4Gi
+# limit at numReplicas:1, where one OOMKill is a full outage.
+applicationName: minwebrender
+
+image:
+  repository: minwebrender
+
+containerPort: 10000
+
+# Fails when Chromium is not connected, so the kubelet restarts a wedged pod.
+# This is the recovery the Render deployment lacked: on 2026-09-03 the single
+# Render instance stopped answering after a handful of concurrent renders and
+# stayed down, because the browser was launched once at import and never
+# re-checked.
+livenessProbePath: /healthz
+readinessProbePath: /readyz
+
+# Chromium launches at import, before gunicorn binds, so startup is seconds.
+livenessProbeInitialDelaySeconds: 30
+readinessProbeInitialDelaySeconds: 15
+livenessProbeTimeoutSeconds: 5
+readinessProbeFailureThreshold: 3
+
+# Sized for MAX_PAGES=6: ~200Mi Chromium base + ~80Mi per open page + ~150Mi
+# Python. Raise both together with MAX_PAGES, or add replicas instead.
+# No CPU limit on purpose -- rendering is bursty and CFS throttling surfaces as
+# navigation timeouts.
+resources:
+  requests:
+    memory: "1Gi"
+    cpu: "500m"
+  limits:
+    memory: "2Gi"
+
+configMap:
+  # Stamped onto rewritten <a href>s. Must be the in-cluster Service address so
+  # links a crawl follows resolve back to this renderer.
+  DOMAIN: "minwebrender:10000"
+  # Concurrent Chromium pages per pod; the memory driver above.
+  MAX_PAGES: "6"
+  # Below the caller's 60s tool timeout so a slow page 504s here.
+  PAGE_TIMEOUT_MS: "45000"
+
+# Spread replicas across AZs first, then hosts, so one node or zone loss cannot
+# take out the whole renderer pool.
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          topologyKey: topology.kubernetes.io/zone
+          labelSelector:
+            matchLabels:
+              app: minwebrender
+      - weight: 50
+        podAffinityTerm:
+          topologyKey: kubernetes.io/hostname
+          labelSelector:
+            matchLabels:
+              app: minwebrender
+
+# Reuses the existing agentic-research node group rather than asking for a new
+# one: the only caller runs there, so renders stay node-local. Trade-off is
+# Chromium competing for memory with the batch runner on the same nodes -- if
+# that bites, ask infra for a `dedicated: minwebrender` group and swap these
+# two blocks over to it.
+nodeSelector:
+  dedicated: agentic-research
+
+tolerations:
+  - key: dedicated
+    operator: Equal
+    value: agentic-research
+    effect: NoSchedule
