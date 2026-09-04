@@ -59,7 +59,23 @@ test_image:
     # `docker`, and curl exits 6 (could not resolve) on the latter. Using
     # `docker exec` sidesteps cross-container DNS and port publishing entirely.
     # python needs no installing: this is the Playwright *python* image.
-    - docker run -d --name mwr $ECR_REPO:temporary-$CI_COMMIT_SHORT_SHA-$CI_COMMIT_REF_SLUG
+    #
+    # seccomp=unconfined is required by the runner's Docker 19.03, not by the
+    # app. Docker returns EPERM for any syscall its seccomp profile does not
+    # know, and clone3 was only allowed in 20.10.10+. glibc 2.34+ calls clone3
+    # BEFORE falling back to clone, and this base image is Ubuntu 22.04
+    # (glibc 2.35) -- so no thread can start at all: gunicorn's worker died on
+    # `async_thread.start()` with "RuntimeError: can't start new thread". The
+    # earlier pip failure in the build was the same cause wearing a different
+    # hat.
+    # This relaxation is CI-only and never ships. EKS nodes run a modern
+    # runtime where clone3 is permitted, so the pod is unaffected. The real
+    # fixes, in preference order: upgrade the dind service past 20.10.10, or
+    # move to a base image with glibc < 2.34. Both are bigger changes than this
+    # job warrants, and note `docker build` in 19.03 cannot take this flag at
+    # all -- so if the build ever needs a thread, one of those becomes
+    # mandatory.
+    - docker run -d --name mwr --security-opt seccomp=unconfined $ECR_REPO:temporary-$CI_COMMIT_SHORT_SHA-$CI_COMMIT_REF_SLUG
     # Chromium launches at import, so readiness is seconds; poll rather than sleep.
     - for i in $(seq 1 30); do docker exec mwr python -c "import urllib.request; urllib.request.urlopen('http://localhost:10000/healthz', timeout=2)" >/dev/null 2>&1 && break || sleep 2; done
     # urlopen raises on any non-2xx, so a 503 from a dead browser fails the job.
