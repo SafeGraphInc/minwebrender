@@ -75,8 +75,15 @@ class BrowserService:
             logger.info("Chromium launched (max_pages=%s)", self.max_pages)
 
     def healthy(self) -> bool:
-        """True when a live browser is attached. Drives the liveness probe."""
-        return self.browser is not None and self.browser.is_connected()
+        """True when a live browser is attached. Drives the liveness probe.
+
+        Reads self.browser once into a local: this runs on a Flask request
+        thread while stop() and _ensure_browser() mutate the attribute on the
+        async loop, so checking and then dereferencing self.browser could see
+        None on the second read and raise AttributeError.
+        """
+        browser = self.browser
+        return browser is not None and browser.is_connected()
 
     async def render_page_and_extract_text(self, url):
         """Render a page, waiting for a free slot in the page semaphore."""

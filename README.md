@@ -25,6 +25,7 @@ to Firecrawl, then to Serper's scrape API, when this service is unreachable.
 | `DOMAIN` | `0.0.0.0:10000` | Host stamped onto rewritten `<a href>`s. Set to the Service address. |
 | `MAX_PAGES` | `6` | Concurrent Chromium pages. Drives the memory limit. |
 | `PAGE_TIMEOUT_MS` | `45000` | Per-page navigation budget. Keep under the caller's tool timeout. |
+| `REQUEST_TIMEOUT_MS` | `75000` | Ceiling on the whole request, including the wait for a free page slot. Keep under gunicorn's `--timeout`. |
 | `PORT` | `10000` | Dev server only; gunicorn binds 10000 in the image. |
 | `LOG_LEVEL` | `INFO` | |
 
