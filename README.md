@@ -55,8 +55,11 @@ build -> test -> push to ECR   -->  helm release `minwebrender`
 ```
 
 - **Image**: `$ECR_REGISTRY/minwebrender`, tag `latest` from the default branch.
-  Built on Playwright's own base image so Chromium and its ~100 apt
-  dependencies are already installed and version-matched to the pip package.
+  Built on `python:3.10-bullseye` and installs Chromium with
+  `playwright install --with-deps`, so the browser revision is chosen by the
+  pinned `playwright` package. Debian 11 is deliberate: glibc 2.34+ calls
+  `clone3`, which the CI runner's Docker 19.03 rejects, and no thread can then
+  start. See the comment at the top of the Dockerfile.
 - **Values**: [deploy/helm/](deploy/helm/) — `base.yaml` plus
   `values-production.yaml` (3 replicas) and `values-staging.yaml` (1 replica).
 - **Internal-only**: ClusterIP, no ingress. Callers use
