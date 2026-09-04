@@ -1,0 +1,38 @@
+# Three replicas, deliberately: the Render outage was a single-instance wedge,
+# and MAX_PAGES=6 per pod gives ~18 concurrent renders -- comfortably above the
+# caller's process-global 24-slot tool semaphore once web_render is only a
+# fraction of tool traffic.
+numReplicas: 3
+minAvailableReplicas: 2
+
+environment: production
+
+# NOTE: no `subdomain` set, on purpose -- this service is internal-only and
+# should get a ClusterIP with no ingress. The public minwebrender.net was an
+# unauthenticated open renderer: anyone could make SafeGraph infrastructure
+# fetch any URL. Keeping it off the internet closes that.
+#
+# Callers reach it at http://minwebrender.<namespace>.svc.cluster.local:10000
+# (or plain http://minwebrender:10000 from the same namespace), which is what
+# agentic-research sets MIN_WEB_RENDER_BASE_URL to.
+#
+# VERIFY against the shared chart: if it requires `subdomain` to render a
+# Service at all, set an internal-only host and confirm the ingress is not
+# public. Do not point minwebrender.net at this.
+
+# Unlike agentic-research, safe-to-evict is left at the default: renders take
+# seconds and 3 replicas absorb a drain, so pinning nodes alive would only
+# block cluster-autoscaler for no benefit.
+
+# No serviceAccount role-arn: the renderer touches no AWS APIs -- no S3, no
+# RDS, no Secrets Manager. Nothing to grant.
+
+configMap:
+  DOMAIN: "minwebrender:10000"
+  MAX_PAGES: "6"
+  PAGE_TIMEOUT_MS: "45000"
+  LOG_LEVEL: "INFO"
+
+# No externalSecrets: the renderer holds no API keys. The Serper and Firecrawl
+# fallbacks live in the *caller* (agentic-research), which already has those
+# secrets.

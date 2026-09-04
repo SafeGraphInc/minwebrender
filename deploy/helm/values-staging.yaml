@@ -1,0 +1,12 @@
+numReplicas: 1
+
+environment: development
+
+# Internal-only, same as production -- see the note in values-production.yaml.
+# Callers: http://minwebrender.<namespace>.svc.cluster.local:10000
+
+configMap:
+  DOMAIN: "minwebrender:10000"
+  MAX_PAGES: "3"
+  PAGE_TIMEOUT_MS: "45000"
+  LOG_LEVEL: "DEBUG"
