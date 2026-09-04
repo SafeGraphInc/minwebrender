@@ -2,11 +2,12 @@ numReplicas: 1
 
 environment: development
 
-# Internal-only, same as production -- see the note in values-production.yaml.
-# Callers: http://minwebrender.<namespace>.svc.cluster.local:10000
+# Internal to the VPC, same as production -- see the note in
+# values-production.yaml. In-cluster callers use http://minwebrender.
+subdomain: minwebrender.dev.safegraph.io
 
 configMap:
-  DOMAIN: "minwebrender:10000"
+  DOMAIN: "minwebrender"
   MAX_PAGES: "3"
   PAGE_TIMEOUT_MS: "45000"
   LOG_LEVEL: "DEBUG"

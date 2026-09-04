@@ -7,18 +7,21 @@ minAvailableReplicas: 2
 
 environment: production
 
-# NOTE: no `subdomain` set, on purpose -- this service is internal-only and
-# should get a ClusterIP with no ingress. The public minwebrender.net was an
-# unauthenticated open renderer: anyone could make SafeGraph infrastructure
-# fetch any URL. Keeping it off the internet closes that.
+# The shared chart has no ClusterIP-only mode: it always renders either a
+# LoadBalancer Service or (its default) a NodePort plus an ALB, and `subdomain`
+# supplies the DNS name. Leaving it blank does not disable anything -- it just
+# yields an ALB with an empty hostname annotation -- so it is set here.
 #
-# Callers reach it at http://minwebrender.<namespace>.svc.cluster.local:10000
-# (or plain http://minwebrender:10000 from the same namespace), which is what
-# agentic-research sets MIN_WEB_RENDER_BASE_URL to.
+# This stays off the public internet: `loadbalancerIsPublic` defaults to false,
+# so the ALB is internal to the VPC. That was the point. The old public
+# minwebrender.net was an unauthenticated open renderer -- anyone could make
+# SafeGraph infrastructure fetch any URL. Do not point that domain here, and do
+# not set loadbalancerIsPublic.
 #
-# VERIFY against the shared chart: if it requires `subdomain` to render a
-# Service at all, set an internal-only host and confirm the ingress is not
-# public. Do not point minwebrender.net at this.
+# In-cluster callers do not use this hostname or the load balancer at all: they
+# resolve the Service directly at http://minwebrender (port 80 -> pod 10000),
+# which is what agentic-research sets MIN_WEB_RENDER_BASE_URL to.
+subdomain: minwebrender.safegraph.io
 
 # Unlike agentic-research, safe-to-evict is left at the default: renders take
 # seconds and 3 replicas absorb a drain, so pinning nodes alive would only
@@ -28,7 +31,7 @@ environment: production
 # RDS, no Secrets Manager. Nothing to grant.
 
 configMap:
-  DOMAIN: "minwebrender:10000"
+  DOMAIN: "minwebrender"
   MAX_PAGES: "6"
   PAGE_TIMEOUT_MS: "45000"
   LOG_LEVEL: "INFO"

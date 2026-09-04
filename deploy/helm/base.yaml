@@ -40,8 +40,10 @@ resources:
 
 configMap:
   # Stamped onto rewritten <a href>s. Must be the in-cluster Service address so
-  # links a crawl follows resolve back to this renderer.
-  DOMAIN: "minwebrender:10000"
+  # links a crawl follows resolve back to this renderer. No port: the chart puts
+  # the Service on 80 and forwards to containerPort 10000, so 10000 is the pod
+  # port, not the address anything connects to.
+  DOMAIN: "minwebrender"
   # Concurrent Chromium pages per pod; the memory driver above.
   MAX_PAGES: "6"
   # Below the caller's 60s tool timeout so a slow page 504s here.
