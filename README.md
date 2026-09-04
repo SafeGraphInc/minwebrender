@@ -8,12 +8,32 @@ Its consumer is the `web_render` agent tool in
 which calls it for every page an agent needs to read. `web_render` falls back
 to Firecrawl, then to Serper's scrape API, when this service is unreachable.
 
+## Endpoints
+
+| Route | Purpose |
+|---|---|
+| `GET /<url>` | Render as an HTML page. The contract `web_render` speaks today. |
+| `GET /text/<url>` | Same render as `text/plain`, skipping the markdown→HTML round trip. |
+| `GET /healthz` | Liveness. 503 when Chromium is not connected. |
+| `GET /readyz` | Readiness. Same signal. |
+| `GET /` | Human-facing form. |
+
+## Configuration
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `DOMAIN` | `0.0.0.0:10000` | Host stamped onto rewritten `<a href>`s. Set to the Service address. |
+| `MAX_PAGES` | `6` | Concurrent Chromium pages. Drives the memory limit. |
+| `PAGE_TIMEOUT_MS` | `45000` | Per-page navigation budget. Keep under the caller's tool timeout. |
+| `PORT` | `10000` | Dev server only; gunicorn binds 10000 in the image. |
+| `LOG_LEVEL` | `INFO` | |
+
 ## Local development
 
 ```bash
 pip install -r requirements.txt && playwright install chromium
 python main.py                        # http://localhost:10000
-curl localhost:10000/example.com
+curl localhost:10000/text/example.com
 ```
 
 Or via the image, which is what CI and EKS run:
@@ -52,3 +72,16 @@ build -> test -> push to ECR   -->  helm release `minwebrender`
   throughput. Scale with replicas.
 
 Previously deployed on Render.com behind `minwebrender.net`.
+
+### Differences from the Render deployment
+
+- `_ensure_browser()` relaunches a disconnected browser under a lock. The old
+  code launched Chromium once at import and never re-checked it, so a dead
+  browser wedged the process until someone redeployed — the cause of the
+  2026-09-03 outage, when the single instance stopped answering after a handful
+  of concurrent renders and did not recover.
+- `/healthz` and `/readyz`, so the kubelet can restart what a relaunch cannot
+  fix, and 3 replicas so there is no single instance to wedge.
+- `--no-sandbox --disable-dev-shm-usage`, needed under a pod's seccomp profile
+  and 64Mi `/dev/shm`.
+- Not exposed to the internet.
