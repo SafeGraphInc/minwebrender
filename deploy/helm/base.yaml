@@ -65,16 +65,12 @@ affinity:
             matchLabels:
               app: minwebrender
 
-# Reuses the existing agentic-research node group rather than asking for a new
-# one: the only caller runs there, so renders stay node-local. Trade-off is
-# Chromium competing for memory with the batch runner on the same nodes -- if
-# that bites, ask infra for a `dedicated: minwebrender` group and swap these
-# two blocks over to it.
-nodeSelector:
-  dedicated: agentic-research
-
-tolerations:
-  - key: dedicated
-    operator: Equal
-    value: agentic-research
-    effect: NoSchedule
+# No nodeSelector or tolerations on purpose: the renderer schedules on the
+# cluster's general `default` node group (min 3 / max 48 nodes) like any other
+# service. It previously targeted `dedicated: agentic-research`, which is a
+# tainted group capped at 3 nodes -- the tightest capacity on the cluster, and
+# fenced off for that service. Chromium uses its full memory limit, and
+# agentic-research pins its nodes against eviction and has a history of OOM
+# crashes, so co-tenancy made one service's bad day into both services'.
+# The general group also exists on the staging cluster, where the
+# agentic-research group does not, so staging can schedule at all.
