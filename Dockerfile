@@ -1,18 +1,25 @@
-# Debian 12 (bookworm). The previous pin to Debian 11 existed because the CI
-# runner used Docker 19.03, whose seccomp profile answers the clone3 syscall
-# with EPERM rather than ENOSYS -- so glibc 2.34+ gave up and NO thread could
-# start. gunicorn died at import on `async_thread.start()` with "RuntimeError:
-# can't start new thread", and pip died the same way earlier in the build.
-# clone3 was allowlisted in Docker 20.10.10 (moby/moby#42680), and CI now runs
-# Docker 28, so the constraint is gone.
+# Debian 11 (glibc 2.31) on purpose, NOT a newer base.
 #
-# Removing it matters: Debian 11 left LTS on 2026-08-31 and its packages moved
-# off deb.debian.org, so `playwright install --with-deps` began failing with
-# 404s on every security package. Bookworm is supported into 2028.
+# glibc 2.34+ calls clone3 before falling back to clone, and the CI runner's
+# Docker 19.03 seccomp profile answers unknown syscalls with EPERM rather than
+# ENOSYS -- so glibc gives up and NO thread can start. Playwright's own image
+# is Ubuntu 22.04 (glibc 2.35), where gunicorn died at import on
+# `async_thread.start()` with "RuntimeError: can't start new thread", and pip
+# died the same way earlier in the build. clone3 was only allowlisted in Docker
+# 20.10.10. See moby/moby#42680.
 #
-# If threads ever fail to start again, check the CI Docker version before
-# changing this line -- that is the cause, not the base image.
-FROM python:3.10-bookworm
+# Playwright's focal image would also be glibc 2.31, but it installs Ubuntu
+# 20.04's python3 (3.8) and the pinned Werkzeug 3.1.5 and Markdown 3.8.1 both
+# require >=3.9. Debian 11 gives glibc 2.31 AND Python 3.10.
+#
+# Bookworm was tried (PR #16) together with a CI bump to Docker 28, which
+# would have removed the clone3 constraint. The image built and ran, but the
+# dind service stopped starting on the runner and every job failed before
+# reaching `docker build` -- first on the derived service hostname, then on an
+# explicit alias, so the service itself is not coming up on Docker 28. That
+# needs the runner's service log to diagnose, so the base stays on Debian 11
+# and only the dead mirror is fixed below.
+FROM python:3.10-bullseye
 
 # Outside $HOME so the unprivileged runtime user can read the browsers.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
@@ -30,6 +37,24 @@ WORKDIR /app
 # requirement here is pinned.
 COPY requirements.txt ./
 RUN pip install -r requirements.txt
+
+# Debian 11 left LTS on 2026-08-31 and its packages moved off deb.debian.org,
+# so `playwright install --with-deps` began failing with 404 on every security
+# package it needs. archive.debian.org still serves bullseye (verified:
+# dists/bullseye/Release and dists/bullseye-security/Release both 200).
+#
+# Check-Valid-Until is disabled because an archived suite's Release file is
+# past its expiry by definition; apt would otherwise refuse the index outright.
+#
+# This is a holding position, not a fix: an archived suite gets no further
+# security updates. The real fix is a newer base, which needs the CI runner on
+# Docker 20.10.10+ -- see the note above.
+RUN printf '%s\n' \
+      'deb http://archive.debian.org/debian bullseye main' \
+      'deb http://archive.debian.org/debian-security bullseye-security main' \
+      > /etc/apt/sources.list && \
+    printf 'Acquire::Check-Valid-Until "false";\n' \
+      > /etc/apt/apt.conf.d/99archived-suite
 
 # Chromium plus its apt dependencies, at the revision the installed playwright
 # package expects. This is a STRONGER version guarantee than picking a prebuilt
