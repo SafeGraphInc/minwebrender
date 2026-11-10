@@ -66,7 +66,17 @@ test_image:
     - docker exec mwr python -c "import urllib.request; urllib.request.urlopen('http://localhost:10000/healthz', timeout=5)"
     - docker exec mwr python -c "import urllib.request; urllib.request.urlopen('http://localhost:10000/readyz', timeout=5)"
     # The real test: render a page end-to-end through Chromium.
-    - docker exec mwr python -c "import sys, urllib.request; body = urllib.request.urlopen('http://localhost:10000/text/example.com', timeout=90).read().decode(); sys.exit(0 if 'Example Domain' in body else 1)"
+    # Asserts that real page text came back, not one exact phrase. example.com
+    # was redesigned and now carries "Example Domain" only in <title>; there
+    # is no <h1> any more. extract_text_content runs html2text over the body,
+    # and <title> lives in <head>, so the old assertion became unsatisfiable
+    # while the renderer was working perfectly -- healthz, readyz and a 200
+    # with real text all passed.
+    #
+    # "domain" survived that rewrite and is hard to lose while the page is
+    # still about domains; the length check is what actually catches a blank
+    # or error page, which is the failure worth failing on.
+    - docker exec mwr python -c "import sys, urllib.request; body = urllib.request.urlopen('http://localhost:10000/text/example.com', timeout=90).read().decode(); sys.exit(0 if len(body) > 100 and 'domain' in body.lower() else 1)"
   # Always runs, so a failing probe still leaves the container logs in the job
   # output instead of aborting before `docker logs`.
   after_script:
