@@ -24,6 +24,31 @@ max_pages_env = int(os.getenv("MAX_PAGES", 6))
 # page surfaces as a 504 here rather than as a hung request upstream.
 page_timeout_ms = int(os.getenv("PAGE_TIMEOUT_MS", 45000))
 
+# Ceiling on the HTML this process will parse, and on the text it returns.
+#
+# extract_text_content holds four representations of one page at once -- the
+# raw HTML, the BeautifulSoup tree, the mutated str(soup) copy, and the
+# markdown -- so peak memory is several times the page size. With MAX_PAGES
+# concurrent renders sharing one memory limit, a single large page is enough
+# to OOM the pod, and on 2026-11-10 one did.
+#
+# The output cap is the same bound seen from the caller's side: the rendered
+# text goes into an LLM context, and an uncapped page has pushed single-pass
+# agents past 500k tokens. Truncating is strictly better than the two things
+# that happen without it -- the pod dies, or the caller pays for a page it
+# cannot use.
+#
+# Both are generous: a real business website is a few hundred KB of HTML and
+# a few tens of KB of text. Anything past these is a document dump, an
+# infinite scroll, or a misdirected URL.
+max_html_bytes = int(os.getenv("MAX_HTML_BYTES", 5_000_000))
+max_text_chars = int(os.getenv("MAX_TEXT_CHARS", 200_000))
+
+# Appended so the caller can tell a truncated page from a short one. The
+# distinction matters: the prompt reads "any website content confirms open",
+# and silence about truncation would let a 5MB page look like a thin one.
+TRUNCATION_NOTE = "\n\n[truncated by minwebrender: page exceeded the size limit]"
+
 class BrowserService:
     def __init__(self, max_pages=max_pages_env):
         self.browser = None
@@ -103,6 +128,17 @@ class BrowserService:
 
 
 def extract_text_content(html_content, original_url, host_url):
+    # Before the soup, not after. Parsing is where the memory goes, so a cap
+    # applied to the output would be measured after the damage is done.
+    truncated = False
+    if len(html_content) > max_html_bytes:
+        logger.warning(
+            "html %d bytes exceeds MAX_HTML_BYTES %d for %s; parsing a prefix",
+            len(html_content), max_html_bytes, original_url,
+        )
+        html_content = html_content[:max_html_bytes]
+        truncated = True
+
     soup = BeautifulSoup(html_content, 'html.parser')
 
     for element in soup(['script', 'style', 'img']):
@@ -131,5 +167,16 @@ def extract_text_content(html_content, original_url, host_url):
     markdown_text = re.sub(r'[ \t]+', ' ', markdown_text).strip()
     paragraphs = markdown_text.split('\n\n')
     formatted_markdown = '\n\n'.join(paragraph.strip() for paragraph in paragraphs)
+
+    if len(formatted_markdown) > max_text_chars:
+        logger.warning(
+            "text %d chars exceeds MAX_TEXT_CHARS %d for %s; truncating",
+            len(formatted_markdown), max_text_chars, original_url,
+        )
+        formatted_markdown = formatted_markdown[:max_text_chars]
+        truncated = True
+
+    if truncated:
+        formatted_markdown += TRUNCATION_NOTE
 
     return formatted_markdown
