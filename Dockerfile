@@ -1,17 +1,18 @@
-# Debian 11 (glibc 2.31) on purpose, NOT a newer base.
+# Debian 12 (bookworm). The previous pin to Debian 11 existed because the CI
+# runner used Docker 19.03, whose seccomp profile answers the clone3 syscall
+# with EPERM rather than ENOSYS -- so glibc 2.34+ gave up and NO thread could
+# start. gunicorn died at import on `async_thread.start()` with "RuntimeError:
+# can't start new thread", and pip died the same way earlier in the build.
+# clone3 was allowlisted in Docker 20.10.10 (moby/moby#42680), and CI now runs
+# Docker 28, so the constraint is gone.
 #
-# glibc 2.34+ calls clone3 before falling back to clone, and the CI runner's
-# Docker 19.03 seccomp profile answers unknown syscalls with EPERM rather than
-# ENOSYS -- so glibc gives up and NO thread can start. Playwright's own image
-# is Ubuntu 22.04 (glibc 2.35), where gunicorn died at import on
-# `async_thread.start()` with "RuntimeError: can't start new thread", and pip
-# died the same way earlier in the build. clone3 was only allowlisted in Docker
-# 20.10.10. See moby/moby#42680.
+# Removing it matters: Debian 11 left LTS on 2026-08-31 and its packages moved
+# off deb.debian.org, so `playwright install --with-deps` began failing with
+# 404s on every security package. Bookworm is supported into 2028.
 #
-# Playwright's focal image would also be glibc 2.31, but it installs Ubuntu
-# 20.04's python3 (3.8) and the pinned Werkzeug 3.1.5 and Markdown 3.8.1 both
-# require >=3.9. Debian 11 gives glibc 2.31 AND Python 3.10.
-FROM python:3.10-bullseye
+# If threads ever fail to start again, check the CI Docker version before
+# changing this line -- that is the cause, not the base image.
+FROM python:3.10-bookworm
 
 # Outside $HOME so the unprivileged runtime user can read the browsers.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
