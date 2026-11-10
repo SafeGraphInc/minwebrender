@@ -24,7 +24,11 @@ readinessProbePath: /readyz
 # Chromium launches at import, before gunicorn binds, so startup is seconds.
 livenessProbeInitialDelaySeconds: 30
 readinessProbeInitialDelaySeconds: 15
-livenessProbeTimeoutSeconds: 5
+# 10s, not 5: /healthz does no work, but it still has to be picked up by a
+# gunicorn thread, and under a burst that wait is queueing rather than
+# sickness. The thread headroom in the Dockerfile is the real fix; this is
+# the margin that stops a brief spike from killing a healthy pod.
+livenessProbeTimeoutSeconds: 10
 readinessProbeFailureThreshold: 3
 
 # Sized for MAX_PAGES=6: ~200Mi Chromium base + ~80Mi per open page + ~150Mi

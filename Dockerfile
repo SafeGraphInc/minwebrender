@@ -74,11 +74,23 @@ USER appuser
 EXPOSE 10000
 
 # -w 1: one worker == one Chromium (see main.py). --threads serves concurrent
-# requests; keep it >= MAX_PAGES so a full page semaphore is the bottleneck
-# rather than thread starvation. --timeout must exceed PAGE_TIMEOUT_MS (45s) or
+# requests, and must leave headroom ABOVE MAX_PAGES for the probes.
+#
+# Every render blocks its thread on future.result() while the work happens on
+# the asyncio loop, so concurrent requests consume threads one for one. At
+# --threads 12 with MAX_PAGES 6, twelve in-flight requests -- six rendering,
+# six queued on the page semaphore -- leave nothing to answer /healthz, and
+# the probe times out in the socket backlog rather than returning 503. The
+# kubelet then kills a pod that is working fine: observed 2026-11-10, healthz
+# 200 at 21:17:22 and SIGTERM at 21:17:23, three times across the fleet.
+#
+# >= MAX_PAGES was the old rule and it is not enough: it guarantees renders
+# are not thread-starved, not that anything is left for a probe. 32 is
+# generous on purpose -- a thread parked on I/O costs almost nothing, while
+# the page semaphore still caps real concurrency at MAX_PAGES. --timeout must exceed PAGE_TIMEOUT_MS (45s) or
 # gunicorn kills the worker -- and thus the browser -- mid-render.
 CMD ["gunicorn", "--bind", "0.0.0.0:10000", \
-     "-w", "1", "--threads", "12", "--worker-class", "gthread", \
+     "-w", "1", "--threads", "32", "--worker-class", "gthread", \
      "--timeout", "90", "--graceful-timeout", "30", \
      "--access-logfile", "-", "--error-logfile", "-", \
      "main:app"]
