@@ -1,7 +1,8 @@
 # Three replicas, deliberately: the Render outage was a single-instance wedge,
-# and MAX_PAGES=6 per pod gives ~18 concurrent renders -- comfortably above the
-# caller's process-global 24-slot tool semaphore once web_render is only a
-# fraction of tool traffic.
+# and MAX_PAGES=4 per pod gives ~12 concurrent renders -- still above real
+# demand, because the caller's process-global tool semaphore is 24 per poller
+# process and web_render is a minority of tool calls. Six per pod was not
+# buying throughput, it was widening the worst case for memory.
 numReplicas: 3
 minAvailableReplicas: 2
 
@@ -32,7 +33,7 @@ subdomain: minwebrender.safegraph.io
 
 configMap:
   DOMAIN: "minwebrender"
-  MAX_PAGES: "6"
+  MAX_PAGES: "4"
   PAGE_TIMEOUT_MS: "45000"
   LOG_LEVEL: "INFO"
 

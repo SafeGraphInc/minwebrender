@@ -18,7 +18,17 @@ host = os.getenv("DOMAIN", "0.0.0.0:10000")
 # Concurrent Chromium pages per pod. Each page is ~50-80MB of RSS, so this is
 # the knob that sets the memory limit in deploy/helm/base.yaml. Scale
 # throughput with replicas, not with this.
-max_pages_env = int(os.getenv("MAX_PAGES", 6))
+# Concurrent pages per pod. Lowered from 6: the memory limit is sized on an
+# ~80Mi-per-page average, but the real distribution has a long tail, and the
+# fewer heavy pages can overlap the smaller the worst case. Caller-side
+# demand does not need six -- TOOL_MAX_CONCURRENCY is 24 per poller process
+# and renders are a minority of tool calls, so typical load is a few
+# concurrent renders per replica, not six.
+max_pages_env = int(os.getenv("MAX_PAGES", 4))
+
+# Per-renderer V8 heap ceiling, in MB. Four pages at this ceiling plus the
+# browser base still fits the limit with room for the Python side.
+js_heap_mb = int(os.getenv("JS_HEAP_MB", 256))
 
 # Per-page navigation budget. Kept below the caller's tool timeout so a slow
 # page surfaces as a 504 here rather than as a hung request upstream.
@@ -94,8 +104,23 @@ class BrowserService:
             # Chromium's own sandbox needs syscalls the default pod seccomp
             # profile denies. --disable-dev-shm-usage: /dev/shm is 64MB in a
             # pod by default and Chromium crashes when it fills it.
+            # --js-flags=--max-old-space-size bounds the V8 heap PER RENDERER
+            # process. Without it a page can allocate until the pod's cgroup
+            # limit is hit, which is what has been happening: measured steady
+            # state is ~800Mi of 2048Mi across six pages, matching the ~80Mi
+            # per page this was sized for, and then one JS-heavy site takes
+            # several hundred megabytes on its own and takes the pod with it.
+            #
+            # The output cap added for the OOM does not help here -- it
+            # measures HTML and text size, and a page can hold half a gigabyte
+            # of browser memory while its HTML is 200KB. Zero truncations
+            # fired in the 24h that included an OOMKill, which is how we know.
+            #
+            # A page that hits the ceiling fails that one render instead of
+            # killing five other in-flight ones plus the browser.
             self.browser = await self.playwright.chromium.launch(
-                args=["--no-sandbox", "--disable-dev-shm-usage"],
+                args=["--no-sandbox", "--disable-dev-shm-usage",
+                      f"--js-flags=--max-old-space-size={js_heap_mb}"],
             )
             logger.info("Chromium launched (max_pages=%s)", self.max_pages)
 

@@ -31,8 +31,12 @@ readinessProbeInitialDelaySeconds: 15
 livenessProbeTimeoutSeconds: 10
 readinessProbeFailureThreshold: 3
 
-# Sized for MAX_PAGES=6: ~200Mi Chromium base + ~80Mi per open page + ~150Mi
-# Python. Raise both together with MAX_PAGES, or add replicas instead.
+# Sized for MAX_PAGES=4: ~200Mi Chromium base + per-page Chromium + ~150Mi
+# Python. Measured 2026-11-11 under load: ~800Mi resident with six pages,
+# which matches the old ~80Mi-per-page estimate -- but that is the AVERAGE,
+# and the tail is what OOMs the pod. JS_HEAP_MB bounds the per-page half and
+# MAX_PAGES bounds how many can overlap. Raise both together, or add
+# replicas instead.
 # No CPU limit on purpose -- rendering is bursty and CFS throttling surfaces as
 # navigation timeouts.
 resources:
@@ -49,7 +53,7 @@ configMap:
   # port, not the address anything connects to.
   DOMAIN: "minwebrender"
   # Concurrent Chromium pages per pod; the memory driver above.
-  MAX_PAGES: "6"
+  MAX_PAGES: "4"
   # Below the caller's 60s tool timeout so a slow page 504s here.
   PAGE_TIMEOUT_MS: "45000"
 
